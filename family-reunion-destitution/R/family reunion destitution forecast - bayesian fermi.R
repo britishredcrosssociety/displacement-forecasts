@@ -45,13 +45,17 @@ n_sim <- 10000
 # p_destitute <- p_housing_fail * p_no_income * p_benefit_delay * p_no_crisis
 
 p_housing_insecure <- rbeta(n_sim, 77, 25)
-p_financial_insecure <- rbeta(n_sim, 96, 4)
+p_financial_insecure <- rbeta(n_sim, 90, 10)
 
 # Simulate joint probability of destitution
 p_destitute <- p_housing_insecure * p_financial_insecure
 
+# Use OR
+p_destitue_OR <- 1 - ((1 - p_housing_insecure) * (1 - p_financial_insecure))
+
 # Visualise probability distributions
 plot_distribution(p_destitute, title = "Joint probability of destitution")
+plot_distribution(p_destitue_OR, title = "Probability of destitution (OR)")
 
 plot_distribution(p_housing_insecure, title = "Probability of housing insecurity")
 plot_distribution(p_financial_insecure, title = "Probability of financial insecurity")
@@ -100,7 +104,7 @@ quantile(p_children, 0.75)
 # The grant rate is ~95%, so we'll say 10,000 visas will be granted in the coming months.
 n_arrivals <- 10000
 
-sim_scenario_1 <- forecast_destitution(n_arrivals, p_destitute, n_sim)
+sim_scenario_1 <- forecast_destitution(n_arrivals, p_destitue_OR, n_sim)
 
 plot_distribution(sim_scenario_1)
 
@@ -119,7 +123,7 @@ summarise_distribution(sim_scenario_1_housing)
 # Assuming 5,000 visa grants and arrivals per quarter between now and March 2026
 n_arrivals <- 5000
 
-sim_scenario_2 <- forecast_destitution(n_arrivals, p_destitute, n_sim)
+sim_scenario_2 <- forecast_destitution(n_arrivals, p_destitue_OR, n_sim)
 
 plot_distribution(sim_scenario_2)
 
