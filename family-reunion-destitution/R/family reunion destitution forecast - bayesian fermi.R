@@ -2,8 +2,19 @@ set.seed(2025)
 
 library(tidyverse)
 library(asylum)
+library(MASS)
+
+source("R/fit-Beta.R")
 
 # ---- Functions for simulating number of destitute arrivals ----
+# Correlated Beta draws via Gaussian copula
+rbeta_corr2 <- function(n, a1, b1, a2, b2, rho = 0) {
+  Sigma <- matrix(c(1, rho, rho, 1), 2, 2)
+  z <- mvrnorm(n, mu = c(0,0), Sigma = Sigma)
+  u <- pnorm(z)
+  cbind(qbeta(u[,1], a1, b1), qbeta(u[,2], a2, b2))
+}
+
 forecast_destitution <- function(n_arrivals, probabilities, n_sim = 10000) {
   rbinom(n_sim, size = n_arrivals, prob = probabilities)
 }
@@ -34,18 +45,31 @@ plot_distribution <- function(sim, title = "Expected number of destitute arrival
 # Simulation size
 n_sim <- 10000
 
-# Sample from each distribution
-# (Old, test values that included more drivers of destitution)
-# p_housing_fail <- rbeta(n_sim, 75, 25)
-# p_no_income    <- rbeta(n_sim, 90, 10)
-# p_benefit_delay<- rbeta(n_sim, 80, 20)
-# p_no_crisis    <- rbeta(n_sim, 10, 90)
+# - Risk of housing insecurity -
+# Together At Last reports 77% of people supported had insecure housing
+# We'll assume an interval of roughly 70-80%
+housing_params <- fit_beta_10_90(0.7, 0.8)
+housing_params$fitted_quantiles  # Check fitted quantiles - should be close to c(0.7, 0.8)
 
-# Combine into destitution probability
-# p_destitute <- p_housing_fail * p_no_income * p_benefit_delay * p_no_crisis
+p_housing_insecure <- rbeta(n_sim, housing_params$alpha, housing_params$beta)
 
-p_housing_insecure <- rbeta(n_sim, 77, 25)
-p_financial_insecure <- rbeta(n_sim, 90, 10)
+# Check the distribution
+plot_distribution(p_housing_insecure, title = "Probability of housing insecurity")
+
+# - Risk of financial insecurity -
+# Together At Last reports 90% of people supported had financial insecurity
+# We'll assume an interval of roughly 85-95%
+financial_params <- fit_beta_10_90(0.85, 0.90)
+financial_params$fitted_quantiles  # Check fitted quantiles - should be close to c(0.85, 0.95)
+
+p_financial_insecure <- rbeta(n_sim, financial_params$alpha, financial_params$beta)
+
+# Check the distribution
+plot_distribution(p_financial_insecure, title = "Probability of financial insecurity")
+
+P <- rbeta_corr2(n_sim, housing_params$alpha, housing_params$beta, financial_params$alpha, financial_params$beta, rho = 0.75)
+p_housing_insecure <- P[,1]
+p_financial_insecure <- P[,2]
 
 # Simulate joint probability of destitution
 p_destitute <- p_housing_insecure * p_financial_insecure
@@ -56,9 +80,6 @@ p_destitue_OR <- 1 - ((1 - p_housing_insecure) * (1 - p_financial_insecure))
 # Visualise probability distributions
 plot_distribution(p_destitute, title = "Joint probability of destitution")
 plot_distribution(p_destitue_OR, title = "Probability of destitution (OR)")
-
-plot_distribution(p_housing_insecure, title = "Probability of housing insecurity")
-plot_distribution(p_financial_insecure, title = "Probability of financial insecurity")
 
 # ---- What proportion of arrivals might be children? ----
 # Based on family reunion visa data
