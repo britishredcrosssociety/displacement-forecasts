@@ -18,12 +18,6 @@ suppressPackageStartupMessages({
   library(lubridate) # helper functions for working with dates
 })
 
-
-#--- parameters ----------------------------------------------------------------
-
-output_path <- "data"
-
-
 #--- functions -----------------------------------------------------------------
 
 # clean up data column names
@@ -63,9 +57,6 @@ get_applications_range <- function(dat, nationalities) {
   return(data.frame(min = applications_min, max = applications_max))
 }
 
-# dat <- dat_app
-# nationalities <- nationalities[["afghanistan"]]
-
 # project upper and lower number of made decisions
 # arguments:
 #   1. dat - "decisions" dataset
@@ -85,11 +76,11 @@ project_decisions <- function(dat, nationalities, backlog, applications_range) {
   # TODO: move to asylum package
   pos_outcomes <- c(
     "Refugee Permission",
-    "Humanitarian Protection",
-    "Temporary Refugee Permission",
-    "UASC Leave",
-    "Other Grants",
-    "Discretionary Leave"
+    "Humanitarian Protection"
+    # "Temporary Refugee Permission",
+    # "UASC Leave",
+    # "Other Grants",
+    # "Discretionary Leave"
   )
   neg_outcomes <- c(
     "3rd Country Refusal",
@@ -125,13 +116,13 @@ project_decisions <- function(dat, nationalities, backlog, applications_range) {
     perc_wtd <- 0
   }
   
-  # initiate projections for next 5 quarters starting with numbers for current quarter
+  # initiate projections for next 3 quarters starting with numbers for current quarter
   dec$upper[nrow(dec)] <- dec$total[nrow(dec)]
   dec$lower[nrow(dec)] <- dec$total[nrow(dec)]
   dec$backlog_max[nrow(dec)] <- backlog
   dec$backlog_min[nrow(dec)] <- backlog
   
-  dec[(nrow(dec) + 1):(nrow(dec) + 5), ] <- NA
+  dec[(nrow(dec) + 1):(nrow(dec) + 3), ] <- NA
   
   # get the number of maximum and minimum decisions observed recently
   # TODO: not sure how to justify the date
@@ -150,7 +141,7 @@ project_decisions <- function(dat, nationalities, backlog, applications_range) {
   }
   
   # form the result: adjust the values by projected percent of positive, negative and withdraw decisions
-  res <- data.frame(date = dec$date)
+  res <- data.frame(date = dec$date, nationality = nationalities)
   
   res$total_decisions <- dec$total
   res$total_decisions_upper <- dec$upper
@@ -171,30 +162,12 @@ project_decisions <- function(dat, nationalities, backlog, applications_range) {
   res
 }
 
-# get the geographic distribution of asylum seekers in receipt of state support
-# calculation is based done using the most recent date present in the data
-#   1. dat - "state support" dataset
-#   2. nationalities - a vector of specifying what nationalities to include
-process_regional_split <- function(dat, nationalities) {
-  dat <- dat[dat$nationality %in% nationalities, ]
-  dat <- dat[dat$support_type %in% c("Section 95", "Section 98"), ]
-  dat <- dat[dat$date == max(dat$date), ]
-  
-  split <- aggregate(people / sum(people) ~ uk_region_nation, sum, data = dat)
-  
-  colnames(split) <- c("uk_region", "people")
-  
-  rbind(split, data.frame(uk_region = "United Kingdom", people = 1))
-}
-
-
 #--- process -------------------------------------------------------------------
 
 # prepare datasets
 dat_dec <- clean_cols(fetch_decisions()) # decisions
 dat_app <- clean_cols(fetch_applications()) # asylum applications
 dat_bck <- clean_cols(fetch_awaiting_decision()) # awaiting decisions (backlog)
-dat_sup <- clean_cols(fetch_asylum_support()) # state support
 
 # create a list of nationalities (using last 5 years)
 # in order for nationality to be included it has to have at least 10 decisions
@@ -210,19 +183,6 @@ get_nationalities <- function(dat_dec) {
   nationalities_list <- nationalities_agg$nationality[nationalities_agg$decisions > 10]
   nationalities <- setNames(as.list(nationalities_list), tolower(nationalities_list))
   
-  # add necessary nationality groups
-  nationalities[["all nationalities"]] <- unique(dat_dec$nationality)
-  nationalities[["all sap countries"]] <- c(
-    "Afghanistan",
-    "Eritrea",
-    "Libya",
-    "Syria",
-    "Yemen",
-    "Iran",
-    "Iraq",
-    "Sudan"
-  )
-  
   return(nationalities)
 }
 
@@ -231,38 +191,47 @@ nationalities <- get_nationalities(dat_dec)
 # TODO: not sure how to explain
 dat_dec <- dat_dec[dat_dec$date >= ymd("2021.01.01"), ]
 
-# delete any previous .csv output files
-# TODO: maybe add a message displaying the files that were removed
-invisible(file.remove(list.files(
-  output_path,
-  pattern = ".csv$",
-  full.names = TRUE
-)))
+# iterate over all nationalities and project decisions
+decisions = list()
 
-# iterate over all nationalities and save results .csv output files
 for (n in names(nationalities)) {
   total_backlog <- get_applications(dat_bck, nationalities[[n]])
   total_applications <- get_applications_range(dat_app, nationalities[[n]])
-  decisions <- project_decisions(
+  decisions[[n]] <- project_decisions(
     dat_dec,
     nationalities[[n]],
     total_backlog,
     total_applications
   )
-  
-  # only produce the output if the number of positive decisions for the current quarter is above 10
-  if (tail(na.omit(decisions$positive_decisions), 1) > 10) {
-    write.csv(
-      decisions,
-      file.path(output_path, paste0("positive_projected_", n, ".csv")),
-      row.names = FALSE
-    )
-    
-    regional_split <- process_regional_split(dat_sup, nationalities[[n]])
-    write.csv(
-      regional_split,
-      file.path(output_path, paste0("regional_split_", n, ".csv")),
-      row.names = FALSE
-    )
-  }
 }
+
+all_decisions <- do.call(rbind, decisions)
+
+all_decisions |> 
+  filter(date == as.Date("2025-03-30"))
+
+all_decisions <- all_decisions |> 
+  mutate(date = case_when(
+    date == as.Date("2024-12-30") ~ as.Date("2024-12-31"),
+    date == as.Date("2025-03-30") ~ as.Date("2025-03-31"),
+    .default = date)) |>
+  mutate(date = as.Date(date)) |> 
+
+  group_by(date) |> 
+  summarise(
+    total_decisions = sum(total_decisions, na.rm = TRUE),
+    total_decisions_lower = sum(total_decisions_lower, na.rm = TRUE),
+    total_decisions_upper = sum(total_decisions_upper, na.rm = TRUE),
+    
+    # positive_decisions = sum(positive_decisions, na.rm = TRUE),
+    positive_decisions_lower = sum(positive_decisions_lower, na.rm = TRUE),
+    positive_decisions_upper = sum(positive_decisions_upper, na.rm = TRUE),
+    
+    # negative_decisions = sum(negative_decisions, na.rm = TRUE),
+    negative_decisions_lower = sum(negative_decisions_lower, na.rm = TRUE),
+    negative_decisions_upper = sum(negative_decisions_upper, na.rm = TRUE),
+    
+    # withdraw_decisions = sum(withdraw_decisions, na.rm = TRUE),
+    withdraw_decisions_lower = sum(withdraw_decisions_lower, na.rm = TRUE),
+    withdraw_decisions_upper = sum(withdraw_decisions_upper, na.rm = TRUE)
+  )
