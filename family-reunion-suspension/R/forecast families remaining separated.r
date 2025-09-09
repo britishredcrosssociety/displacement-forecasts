@@ -13,10 +13,8 @@
 
 #--- libraries -----------------------------------------------------------------
 
-suppressPackageStartupMessages({
-  library(asylum) # contains prepared data tables
-  library(lubridate) # helper functions for working with dates
-})
+library(tidyverse)
+library(asylum)
 
 #--- functions -----------------------------------------------------------------
 
@@ -205,12 +203,11 @@ for (n in names(nationalities)) {
   )
 }
 
+# Aggregate all nationalities into a single dataframe
 all_decisions <- do.call(rbind, decisions)
 
-all_decisions |> 
-  filter(date == as.Date("2025-03-30"))
-
 all_decisions <- all_decisions |> 
+  # Fix date weirdness
   mutate(date = case_when(
     date == as.Date("2024-12-30") ~ as.Date("2024-12-31"),
     date == as.Date("2025-03-30") ~ as.Date("2025-03-31"),
@@ -234,4 +231,135 @@ all_decisions <- all_decisions |>
     # withdraw_decisions = sum(withdraw_decisions, na.rm = TRUE),
     withdraw_decisions_lower = sum(withdraw_decisions_lower, na.rm = TRUE),
     withdraw_decisions_upper = sum(withdraw_decisions_upper, na.rm = TRUE)
+  )
+
+#--- Family Reunion visas -----------------------------------------------------------------
+fr <- clean_cols(fetch_reunion())
+
+# What proportion of FR visas are adults vs children?
+fr_adults_kids <- fr |> 
+  mutate(age_group = if_else(age == "Under 18", "Child", "Adult")) |> 
+  group_by(date, age_group) |> 
+  summarise(visas_granted = sum(visas_granted)) |>
+  ungroup() |> 
+  group_by(date) |> 
+  mutate(prop = visas_granted / sum(visas_granted)) |> 
+  ungroup()
+
+# Plot the proportion of FR visas granted to adults vs children since 2022
+fr_adults_kids |> 
+  filter(year(date) >= 2022) |> 
+  ggplot(aes(x = date, y = prop, fill = age_group)) +
+  geom_area() +
+  labs(
+    title = "Proportion of FR visas granted to adults vs children",
+    x = "Date",
+    y = "Proportion"
+  ) +
+  theme_minimal()
+
+# Average proportion of adults and children over the last two years
+fr_adults_kids_summary <- fr_adults_kids |> 
+  filter(date >= max(date) - dmonths(24)) |> 
+  group_by(age_group) |> 
+  summarise(
+    avg_prop = mean(prop),
+    sd_prop = sd(prop)
+  ) |> 
+  ungroup()
+
+prop_families_granted_visas <- fr_adults_kids_summary$avg_prop[fr_adults_kids_summary$age_group == "Adult"]
+prop_children_granted_visas <- fr_adults_kids_summary$avg_prop[fr_adults_kids_summary$age_group == "Child"]
+children_per_family <- prop_children_granted_visas / prop_families_granted_visas
+
+# What proportion of people granted status get FR visas the following quarter?
+# On average, people apply for Family Reunion 4 months after being granted asylum
+visas <- fr |> 
+  group_by(date) |> 
+  summarise(visas_granted = sum(visas_granted)) |>
+  ungroup()
+
+grants_and_visas <- 
+  dat_dec |> 
+  
+  # Calculate number of grants to main applicants who become eligible for FR
+  filter(applicant_type == "Main applicant") |> 
+  filter(case_outcome %in% c("Refugee Permission", "Humanitarian Protection")) |> 
+  group_by(date) |> 
+  summarise(potential_sponsors = sum(decisions)) |> 
+  ungroup() |> 
+  
+  # Merge visa data
+  left_join(visas, by = "date") |> 
+  drop_na() |> 
+
+  # Calculate number of families reunited and proportion of potential sponsors who successfully apply for visas
+  # To translate individual visas issued into families (i.e. sponsor-households), 
+  # assume that arriving adults are essentially the spouses/partners; 
+  # their share (~44%) is therefore a good proxy for the number of family units reunited
+  mutate(
+    families_reunited = visas_granted * prop_families_granted_visas,
+    prop_sponsors_reunited = families_reunited / lag(potential_sponsors),
+    children_per_potential_sponsor = (visas_granted * prop_children_granted_visas) / lag(potential_sponsors)
+  )
+
+# Plot trends in proportion of people granted asylum who reunite with family
+grants_and_visas |> 
+  ggplot(aes(x = date, y = prop_sponsors_reunited)) +
+  geom_line() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title = "Proportion of people granted asylum who reunite with family",
+    subtitle = "Proportion of main applicants granted asylum who are later granted FR visas",
+    x = "Date",
+    y = "Proportion"
+  ) +
+  theme_minimal()
+
+# Use the latest proportion for forecasts
+prop_sponsors_reunited <- 
+  grants_and_visas |> 
+  tail(1) |> 
+  pull(prop_sponsors_reunited)
+
+prop_children_per_sponsor <- 
+  grants_and_visas |> 
+  tail(1) |> 
+  pull(children_per_potential_sponsor)
+
+#--- Family Reunion visas -----------------------------------------------------------------
+# Forecast number of families who would've been reunited over the next 9 months, 
+# based on projected positive decisions
+fr_forecast <- all_decisions |> 
+  # filter(date >= as.Date("2024-10-01")) |> 
+  tail(3) |> 
+  mutate(
+    families_reunited_lower = positive_decisions_lower * prop_sponsors_reunited,
+    families_reunited_upper = positive_decisions_upper * prop_sponsors_reunited,
+    
+    children_reunited_lower = positive_decisions_lower * prop_children_per_sponsor,
+    children_reunited_upper = positive_decisions_upper * prop_children_per_sponsor,
+  ) |> 
+  select(
+    date,
+    families_reunited_lower,
+    families_reunited_upper,
+    children_reunited_lower,
+    children_reunited_upper
+  )
+
+# Refugee Family Reunion was suspended at the beginning of September, so only take one month for that quarter
+fr_forecast |> 
+  mutate(
+    families_reunited_lower = if_else(date == as.Date("2025-09-30"), families_reunited_lower / 3, families_reunited_lower),
+    families_reunited_upper = if_else(date == as.Date("2025-09-30"), families_reunited_upper / 3, families_reunited_upper),
+    children_reunited_lower = if_else(date == as.Date("2025-09-30"), children_reunited_lower / 3, children_reunited_lower),
+    children_reunited_upper = if_else(date == as.Date("2025-09-30"), children_reunited_upper / 3, children_reunited_upper)
+  ) |> 
+  
+  summarise(
+    families_reunited_lower = sum(families_reunited_lower),
+    families_reunited_upper = sum(families_reunited_upper),
+    children_reunited_lower = sum(children_reunited_lower),
+    children_reunited_upper = sum(children_reunited_upper)
   )
