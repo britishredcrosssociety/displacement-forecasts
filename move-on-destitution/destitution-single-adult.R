@@ -14,7 +14,7 @@ csv_files <- list.files(
   full.names = TRUE
 )
 # Exclude "all_nationalities" and SAP countries
-csv_files <- csv_files[!grepl("all", csv_files)]
+csv_files <- csv_files[!grepl("all_nationalities|all_sap", csv_files)]
 
 # Read and sum all CSVs
 all_nationalities <- csv_files |>
@@ -29,9 +29,9 @@ all_nationalities <- csv_files |>
 
 all_destitute <- all_nationalities |>
   mutate(destitute_total = total_decisions * 0.47,
-    destitute_positive_upper = positive_decisions_upper * 0.47,
-         destitute_positive_lower = positive_decisions_lower * 0.47) |>
-  select(1, 15, 16)
+    destitute_total_upper = total_decisions_upper * 0.47,
+         destitute_total_lower = total_decisions_lower * 0.47) |>
+  select(1, 14, 15, 16)
 
 # ---- Sense check ----
 # Perc of single adults from all decisions made in last year?
@@ -47,12 +47,10 @@ single_adult_share <- fetch_decisions() |>
 
 single_adult_share
 
-all_people <- read_csv("https://raw.githubusercontent.com/britishredcrosssociety/rs-destitution/refs/heads/main/data/positive_projected_all%20nationalities.csv?token=GHSAT0AAAAAADGEAMOJSGK3NA2MWLPYX3IU2F6764A")
-
-check <- tibble(
-  date = all_people$date,
-  positive_upper_all_destitute = all_people$positive_decisions_upper * 0.47,
-  perc_destitute = if_else(all_people$positive_decisions_upper > 0,
-                  all_destitute$destitute_positive_upper / (all_people$positive_decisions_upper * 0.47),
-                  NA_real_)
-)
+all_people <- read_csv("https://raw.githubusercontent.com/britishredcrosssociety/rs-destitution/refs/heads/main/data/positive_projected_all%20nationalities.csv?token=GHSAT0AAAAAADGEAMOJWZBZAISF2HYLOE4C2GAKIKA")
+# 
+# check <- tibble(
+#   date = all_people$date,
+#   positive_upper_all_destitute = all_people$positive_decisions_upper * 0.47,
+#   perc_destitute =  all_destitute$destitute_positive_upper / (all_people$positive_decisions_upper * 0.47)
+                  

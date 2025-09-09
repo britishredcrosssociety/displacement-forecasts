@@ -164,7 +164,7 @@ project_decisions <- function(dat, nationalities, backlog, applications_range) {
 #--- process -------------------------------------------------------------------
 
 # prepare datasets
-# filter for single adults 
+# filter for single adults and UASC for each dataset
 dat_dec <- clean_cols(fetch_decisions()) |>
   filter(applicant_type %in% c("Main applicant") & uasc %in% c("Non-UASC")) # decisions
 
@@ -174,7 +174,14 @@ dat_app <- clean_cols(fetch_applications()) |>
 dat_bck <- clean_cols(fetch_awaiting_decision()) |>
   filter(applicant_type %in% c("Main applicant"))# awaiting decisions (backlog)
 
-# dat_sup <- clean_cols(fetch_asylum_support()) # state support
+# Apply UASC proportion to data_bck (backlog) as not possible to filter in data
+uasc_proportion <- clean_cols(fetch_applications()) |>
+  filter(applicant_type %in% c("Main applicant") & !uasc %in% c("Total (pre-2006)")) |>
+  group_by(uasc) |>
+  summarise(claims = sum(claims, na.rm = TRUE), .groups = "drop") |>
+  mutate(proportion = claims / sum(claims)) |>
+  filter(uasc == "Non-UASC") |>
+  pull(proportion)
 
 # create a list of nationalities (using last 5 years)
 # in order for nationality to be included it has to have at least 10 decisions
@@ -221,7 +228,7 @@ invisible(file.remove(list.files(
 
 # iterate over all nationalities and save results .csv output files
 for (n in names(nationalities)) {
-  total_backlog <- get_applications(dat_bck, nationalities[[n]])
+  total_backlog <- get_applications(dat_bck, nationalities[[n]]) * uasc_proportion
   total_applications <- get_applications_range(dat_app, nationalities[[n]])
   decisions <- project_decisions(
     dat_dec,
