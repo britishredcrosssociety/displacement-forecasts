@@ -49,4 +49,10 @@ single_adult_share
 
 all_people <- read_csv("https://raw.githubusercontent.com/britishredcrosssociety/rs-destitution/refs/heads/main/data/positive_projected_all%20nationalities.csv?token=GHSAT0AAAAAADGEAMOJSGK3NA2MWLPYX3IU2F6764A")
 
-all_destitute$destitute_positive_upper / (all_people$positive_decisions_upper * 0.47)
+check <- tibble(
+  date = all_people$date,
+  positive_upper_all_destitute = all_people$positive_decisions_upper * 0.47,
+  perc_destitute = if_else(all_people$positive_decisions_upper > 0,
+                  all_destitute$destitute_positive_upper / (all_people$positive_decisions_upper * 0.47),
+                  NA_real_)
+)
