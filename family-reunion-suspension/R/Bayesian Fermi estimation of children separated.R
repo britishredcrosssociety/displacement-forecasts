@@ -267,9 +267,6 @@ fr_adults_kids <- fr |>
   mutate(prop = visas_granted / sum(visas_granted)) |> 
   ungroup()
 
-# Optional: if you also have denominators per period for the proportions
-totals_hist <- df$grants_fr
-
 # Fit priors from history
 gamma_prior <- fit_gamma_from_counts(fr_summary$visas_granted)
 beta_prior  <- fit_beta_from_props(fr_adults_kids[fr_adults_kids$age_group == "Child", ]$prop, totals = fr_summary$visas_granted)  # uses reconstructed successes/failures
@@ -277,9 +274,13 @@ beta_prior  <- fit_beta_from_props(fr_adults_kids[fr_adults_kids$age_group == "C
 # Visualize priors
 p_grants <- stats::rgamma(1000, shape = gamma_prior$a, rate = gamma_prior$b)
 hist(p_grants)
+# Overlay actual data onto histogram
+hist(fr_summary$visas_granted, add = TRUE, col = rgb(1,0,0,0.5), breaks = 10)
 
 p_children <- stats::rbeta(1000, shape1 = beta_prior$alpha, shape2 = beta_prior$beta)
 hist(p_children)
+# Overlay actual data onto histogram
+hist(fr_adults_kids[fr_adults_kids$age_group == "Child", ]$prop, add = TRUE, col = rgb(1,0,0,0.5), breaks = 10)
 
 # Forecast next 3 periods (i.e. to the end of March 2026)
 sim <- simulate_fr_children(
