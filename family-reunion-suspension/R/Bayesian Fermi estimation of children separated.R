@@ -244,21 +244,18 @@ clean_cols <- function(df) {
   df
 }
 
-# ---- Bayesian Fermi estimation ----
+# ---- Prep Family Reunion visa data ----
 fr <- clean_cols(fetch_reunion())
 
-# Date from which Family Reunion visa grants became high each quarter
-from_date <- as.Date("2024-06-30")
-
-fr_summary <- fr |> 
-  filter(date >= from_date) |>
+# Check trends in FR visas over time - looking for the date from which visas surged
+# We'll use data up to this point (minus the three quarters )
+fr_summary_all <- fr |> 
   group_by(date) |> 
   summarise(visas_granted = sum(visas_granted)) |> 
   ungroup()
 
 # What proportion of FR visas are adults vs children?
-fr_adults_kids <- fr |> 
-  filter(date >= from_date) |>
+fr_adults_kids_all <- fr |> 
   mutate(age_group = if_else(age == "Under 18", "Child", "Adult")) |> 
   group_by(date, age_group) |> 
   summarise(visas_granted = sum(visas_granted)) |>
@@ -266,6 +263,27 @@ fr_adults_kids <- fr |>
   group_by(date) |> 
   mutate(prop = visas_granted / sum(visas_granted)) |> 
   ungroup()
+
+# ---- Test model against historical data ----
+# Look for when the step change in visa grants began
+fr_summary_all |> 
+  ggplot(aes(x = date, y = visas_granted)) +
+  geom_line()
+
+# Surge in visas started from 2023-09-30, so we'll use the previous quarter 
+# (2023-06-30) as the cut-off. We want to test model performance over a three-quarter
+# time horizon, so will use data up to 2022-09-30 (inclusive) for the priors.
+to_date <- as.Date("2022-09-30")
+
+# Fetch data only up to when the step change in grants began, minus three quarters
+fr_summary <- fr |> 
+  filter(date <= to_date) |>
+  group_by(date) |> 
+  summarise(visas_granted = sum(visas_granted)) |> 
+  ungroup()
+
+fr_adults_kids <- fr_adults_kids_all |> 
+  filter(date <= to_date)
 
 # Fit priors from history
 gamma_prior <- fit_gamma_from_counts(fr_summary$visas_granted)
@@ -275,12 +293,76 @@ beta_prior  <- fit_beta_from_props(fr_adults_kids[fr_adults_kids$age_group == "C
 p_grants <- stats::rgamma(1000, shape = gamma_prior$a, rate = gamma_prior$b)
 hist(p_grants)
 # Overlay actual data onto histogram
-hist(fr_summary$visas_granted, add = TRUE, col = rgb(1,0,0,0.5), breaks = 10)
+hist(fr_summary$visas_granted, add = TRUE, col = rgb(1,0,0,0.5))
 
 p_children <- stats::rbeta(1000, shape1 = beta_prior$alpha, shape2 = beta_prior$beta)
 hist(p_children)
 # Overlay actual data onto histogram
-hist(fr_adults_kids[fr_adults_kids$age_group == "Child", ]$prop, add = TRUE, col = rgb(1,0,0,0.5), breaks = 10)
+hist(fr_adults_kids[fr_adults_kids$age_group == "Child", ]$prop, add = TRUE, col = rgb(1,0,0,0.5))
+
+# Forecast next 3 periods (i.e. to 2023-06-30)
+sim <- simulate_fr_children(
+  counts_hist = fr_summary$visas_granted,
+  props_hist  = fr_adults_kids[fr_adults_kids$age_group == "Child", ]$prop,
+  totals_hist = fr_summary$visas_granted,
+  horizon = 3,
+  n_sim = 10000,
+  resample_lambda = TRUE,  # allow process variability period-to-period
+  resample_theta  = TRUE,  # allow composition to drift
+  rate_adjust = c(1.00, 1.02, 1.02),  # optional trend/scenario (e.g., +2% per period)
+  seed = 2025
+)
+
+# Compare forecast to actual number of children granted visas
+test_accuracy <- 
+  fr_adults_kids_all |> 
+  filter(date > to_date & date <= as.Date("2023-06-30")) |> 
+  filter(age_group == "Child") |> 
+  mutate(period = row_number()) |> 
+  
+  left_join(
+    sim$summary |> 
+      select(period, starts_with("children_")),
+    by = "period"
+  )
+
+test_accuracy |> 
+  ggplot(aes(x = date, y = visas_granted)) +
+  geom_ribbon(aes(ymin = children_q05, ymax = children_q95), alpha = 0.3) +
+  geom_line(aes(y = children_median)) +
+  geom_point(colour = "red", size = 1.1) +
+  scale_y_continuous(limits = c(0, NA)) +
+  theme_minimal()
+
+# Two of the three periods fall within 95% prediction intervals
+# The first period (2022-12-31) is slightly out: actual number of visas granted
+# to children is 37 visas lower than the bottom of our predicted range.
+
+# ---- Forecast future visas granted ----
+# Date from which Family Reunion visa grants became high each quarter
+from_date <- as.Date("2024-06-30")
+
+fr_summary <- fr_summary_all |> 
+  filter(date >= from_date)
+
+# What proportion of FR visas are adults vs children?
+fr_adults_kids <- fr_adults_kids_all |> 
+  filter(date >= from_date)
+
+# Fit priors from history
+gamma_prior <- fit_gamma_from_counts(fr_summary$visas_granted)
+beta_prior  <- fit_beta_from_props(fr_adults_kids[fr_adults_kids$age_group == "Child", ]$prop, totals = fr_summary$visas_granted)  # uses reconstructed successes/failures
+
+# Visualize priors
+p_grants <- stats::rgamma(1000, shape = gamma_prior$a, rate = gamma_prior$b)
+hist(p_grants)
+# Overlay actual data onto histogram
+hist(fr_summary$visas_granted, add = TRUE, col = rgb(1,0,0,0.5))
+
+p_children <- stats::rbeta(1000, shape1 = beta_prior$alpha, shape2 = beta_prior$beta)
+hist(p_children)
+# Overlay actual data onto histogram
+hist(fr_adults_kids[fr_adults_kids$age_group == "Child", ]$prop, add = TRUE, col = rgb(1,0,0,0.5))
 
 # Forecast next 3 periods (i.e. to the end of March 2026)
 sim <- simulate_fr_children(
@@ -304,6 +386,3 @@ sim$summary |>
   
   # Totals
   summarise(across(starts_with("children_"), sum))
-
-# Total children across the horizon
-# sim$total_summary
