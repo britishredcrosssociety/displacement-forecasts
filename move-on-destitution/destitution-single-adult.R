@@ -112,5 +112,7 @@ compare <- compare |>
   all_destitute_total = all_people$total_decisions*0.47,
   single_adult_destitute = single_adult_destitute$destitute_total)
 
+# 59% vs 73% - could be that we are using the pre-filtered all nationalities rather than adding them up?
 mean(compare$single_adult_destitute/compare$all_destitute_total, na.rm = TRUE)
+
 
