@@ -29,6 +29,7 @@ all_nationalities <- csv_files |>
 # Independent Chief Inspector of Borders and Immigration estimates 47% of legacy
 # backlog claims were in receipt of asylum support
 
+# Use figures from table below for write up
 single_adult_destitute <- all_nationalities |>
   mutate(destitute_total = total_decisions * 0.47,
     destitute_total_upper = total_decisions_upper * 0.47,
