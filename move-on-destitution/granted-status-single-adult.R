@@ -1,4 +1,4 @@
-# Code from rs-destitution/data-raw/create_csvs_granted_statusQ32024.r
+# Code adapted from rs-destitution/data-raw/create_csvs_granted_statusQ32024.r
 # Filtered to only include main applicant, non UASC - L 168-175
 
 #--- libraries -----------------------------------------------------------------
@@ -174,9 +174,10 @@ dat_app <- clean_cols(fetch_applications()) |>
 dat_bck <- clean_cols(fetch_awaiting_decision()) |>
   filter(applicant_type %in% c("Main applicant"))# awaiting decisions (backlog)
 
-# Apply UASC proportion to data_bck (backlog) as not possible to filter in data
+# Apply UASC proportion from YTD to data_bck (backlog) as not possible to filter in data
+# Apply proportion when f'n is called below
 uasc_proportion <- clean_cols(fetch_applications()) |>
-  filter(applicant_type %in% c("Main applicant") & !uasc %in% c("Total (pre-2006)")) |>
+  filter(applicant_type %in% c("Main applicant") & !uasc %in% c("Total (pre-2006)") & year == 2025) |>
   group_by(uasc) |>
   summarise(claims = sum(claims, na.rm = TRUE), .groups = "drop") |>
   mutate(proportion = claims / sum(claims)) |>
