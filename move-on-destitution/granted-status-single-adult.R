@@ -166,10 +166,10 @@ project_decisions <- function(dat, nationalities, backlog, applications_range) {
 # prepare datasets
 # filter for single adults and UASC for each dataset
 dat_dec <- clean_cols(fetch_decisions()) |>
-  filter(applicant_type %in% c("Main applicant") & uasc %in% c("Non-UASC")) # decisions
+  filter(applicant_type %in% c("Main applicant") & age != "Under 18" & uasc %in% c("Non-UASC")) # decisions
 
 dat_app <- clean_cols(fetch_applications()) |>
-  filter(applicant_type %in% c("Main applicant") & uasc %in% c("Non-UASC")) # asylum applications
+  filter(applicant_type %in% c("Main applicant") & age != "Under 18" & uasc %in% c("Non-UASC")) # asylum applications
 
 dat_bck <- clean_cols(fetch_awaiting_decision()) |>
   filter(applicant_type %in% c("Main applicant"))# awaiting decisions (backlog)
