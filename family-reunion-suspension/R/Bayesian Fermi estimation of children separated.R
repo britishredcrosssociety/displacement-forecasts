@@ -108,7 +108,7 @@ fit_beta_from_props <- function(
 #'              priors = list(gamma = ..., beta = ...),
 #'              summary = tibble with per-period stats,
 #'              total_summary = tibble with total-across-horizon stats)
-simulate_fr_children <- function(
+simulate_fr <- function(
     counts_hist,
     props_hist,
     totals_hist = NULL,
@@ -301,7 +301,7 @@ hist(p_children)
 hist(fr_adults_kids[fr_adults_kids$age_group == "Child", ]$prop, add = TRUE, col = rgb(1,0,0,0.5))
 
 # Forecast next 3 periods (i.e. to 2023-06-30)
-sim <- simulate_fr_children(
+sim <- simulate_fr(
   counts_hist = fr_summary$visas_granted,
   props_hist  = fr_adults_kids[fr_adults_kids$age_group == "Child", ]$prop,
   totals_hist = fr_summary$visas_granted,
@@ -365,7 +365,7 @@ hist(p_children)
 hist(fr_adults_kids[fr_adults_kids$age_group == "Child", ]$prop, add = TRUE, col = rgb(1,0,0,0.5))
 
 # Forecast next 3 periods (i.e. to the end of March 2026)
-sim <- simulate_fr_children(
+sim <- simulate_fr(
   counts_hist = fr_summary$visas_granted,
   props_hist  = fr_adults_kids[fr_adults_kids$age_group == "Child", ]$prop,
   totals_hist = fr_summary$visas_granted,
@@ -379,6 +379,36 @@ sim <- simulate_fr_children(
 
 # Per-period forecast summary for children
 sim$summary |> 
+  select(period, starts_with("children_")) |> 
+  # For the first quarter, we only want September (the final month) so 
+  # divide every column starting with "children" by 3
+  mutate(across(starts_with("children_"), ~ if_else(period == 1, .x / 3, .x))) |> 
+  
+  # Totals
+  summarise(across(starts_with("children_"), sum))
+
+# ---- Forecast adults, as a proxy for family units ----
+beta_prior_adults  <- fit_beta_from_props(fr_adults_kids[fr_adults_kids$age_group == "Adult", ]$prop, totals = fr_summary$visas_granted)  # uses reconstructed successes/failures
+p_adults <- stats::rbeta(1000, shape1 = beta_prior_adults$alpha, shape2 = beta_prior_adults$beta)
+hist(p_adults)
+# Overlay actual data onto histogram
+hist(fr_adults_kids[fr_adults_kids$age_group == "Adult", ]$prop, add = TRUE, col = rgb(1,0,0,0.5))
+
+# Forecast next 3 periods (i.e. to the end of March 2026)
+sim_adults <- simulate_fr(
+  counts_hist = fr_summary$visas_granted,
+  props_hist  = fr_adults_kids[fr_adults_kids$age_group == "Adult", ]$prop,
+  totals_hist = fr_summary$visas_granted,
+  horizon = 3,
+  n_sim = 10000,
+  resample_lambda = TRUE,  # allow process variability period-to-period
+  resample_theta  = TRUE,  # allow composition to drift
+  rate_adjust = c(1.00, 1.02, 1.02),  # optional trend/scenario (e.g., +2% per period)
+  seed = 2025
+)
+
+# Per-period forecast summary for children
+sim_adults$summary |> 
   select(period, starts_with("children_")) |> 
   # For the first quarter, we only want September (the final month) so 
   # divide every column starting with "children" by 3
