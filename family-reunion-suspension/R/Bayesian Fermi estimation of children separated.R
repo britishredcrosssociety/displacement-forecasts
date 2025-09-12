@@ -390,7 +390,6 @@ test_accuracy |>
 # The first period (2022-12-31) is slightly out: actual number of visas granted
 # to children is 37 visas lower than the bottom of our predicted range.
 
-# ---- Forecast future visas granted ----
 # Date from which Family Reunion visa grants became high each quarter
 from_date <- as.Date("2024-06-30")
 
@@ -401,6 +400,7 @@ fr_summary <- fr_summary_all |>
 fr_adults_kids <- fr_adults_kids_all |>
   filter(date >= from_date)
 
+# ---- Forecast children granted FR visas ----
 # Fit priors from history
 gamma_prior <- fit_gamma_from_counts(fr_summary$visas_granted)
 beta_prior <- fit_beta_from_props(
@@ -496,3 +496,43 @@ sim_adults$summary |>
 
   # Totals
   summarise(across(-period, sum))
+
+# ---- Forecast unaccompanied children ----
+# For proportions of FR visas for unaccompanied children, we only have data
+# from British Red Cross's Family Reunion Travel Assistance (FRTA) service.
+# These proportions are annual figures for 2023, 2024, and 2025 (Jan-Aug).
+# Note: BRC supports only around 5% of all Family Reunion visa holders through
+# FRTA each year, so these proportions may not be representative of all
+# unaccompanied children among the wider group of visa-holders.
+unaccompanied_props <- c(0.158, .113, .164)
+
+fr_summary_annual <- fr |> 
+  group_by(year = year(date)) |> 
+  summarise(visas_granted = sum(visas_granted)) |> 
+  filter(year%in% 2023:2025)
+
+# Forecast next 3 periods (i.e. to the end of March 2026)
+sim_unaccompanied <- simulate_fr(
+  subset_name = "unaccompanied_children",
+  counts_hist = fr_summary$visas_granted,
+  props_hist = unaccompanied_props,
+  totals_hist = fr_summary_annual$visas_granted,
+  horizon = 3,
+  n_sim = 10000,
+  resample_lambda = TRUE, # allow process variability period-to-period
+  resample_theta = TRUE, # allow composition to drift
+  rate_adjust = c(1.00, 1.02, 1.02), # optional trend/scenario (e.g., +2% per period)
+  seed = 2025
+)
+
+# Per-period forecast summary
+sim_unaccompanied$summary |>
+  # For the first quarter, we only want September (the final month) so
+  # divide every column starting with "children" by 3
+  mutate(across(
+    starts_with("unaccompanied_children_"),
+    ~ if_else(period == 1, .x / 3, .x)
+  )) |>
+  
+  # Totals
+  summarise(across(starts_with("unaccompanied_children_"), sum))
