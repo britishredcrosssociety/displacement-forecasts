@@ -36,7 +36,7 @@ fit_gamma_from_counts <- function(counts, overdisp_tolerance = 0.05) {
   list(a = a, b = b, mean = mu, var = s2)
 }
 
-#' Empirical-Bayes Beta prior from historical child proportions
+#' Empirical-Bayes Beta prior from historical proportions of children or adults
 #'
 #' Two modes:
 #' 1) If totals are provided, reconstruct successes/failures and set:
@@ -93,7 +93,7 @@ fit_beta_from_props <- function(
   list(alpha = alpha, beta = beta, mean = m, var = v, mode = mode)
 }
 
-#' Simulate future children granted Family Reunion visas
+#' Simulate future Family Reunion visa grants, including the subset of adults/children
 #'
 #' Pipeline:
 #'   λ ~ Gamma(a,b)   from fit_gamma_from_counts()
@@ -102,7 +102,7 @@ fit_beta_from_props <- function(
 #'   C | N,θ ~ Binomial(N, θ)
 #'
 #' @param counts_hist numeric vector of past FR grants per (equal) period.
-#' @param props_hist  numeric vector of past child proportions in [0,1].
+#' @param props_hist  numeric vector of past adult/child proportions in [0,1].
 #' @param totals_hist optional integer vector of past totals aligned to props_hist (to reconstruct successes).
 #' @param horizon integer, number of future periods to simulate.
 #' @param n_sim integer, number of Monte Carlo draws.
@@ -110,6 +110,7 @@ fit_beta_from_props <- function(
 #' @param resample_theta  logical; if TRUE, draw a fresh θ each future period (lets composition vary).
 #' @param rate_adjust optional numeric vector length horizon; multiplicative factors on expected counts (e.g., trend/scenario).
 #' @param seed optional integer for reproducibility.
+#' @param subset_name character, label for the subset being modeled (e.g., "children" or "adults").
 #' @return list(draws = list(children = matrix, grants = matrix, p_child = matrix),
 #'              priors = list(gamma = ..., beta = ...),
 #'              summary = tibble with per-period stats,
@@ -123,7 +124,8 @@ simulate_fr <- function(
   resample_lambda = TRUE,
   resample_theta = TRUE,
   rate_adjust = NULL,
-  seed = NULL
+  seed = NULL,
+  subset_name = "children"
 ) {
   stopifnot(horizon >= 1, n_sim >= 1)
   if (!is.null(seed)) {
@@ -138,7 +140,7 @@ simulate_fr <- function(
   }
   stopifnot(length(rate_adjust) == horizon, all(rate_adjust >= 0))
 
-  # Draw λ and θ
+  # Draw λ: Number of FR visas granted
   if (resample_lambda) {
     lambda_mat <- matrix(
       stats::rgamma(n_sim * horizon, shape = gfit$a, rate = gfit$b),
@@ -150,6 +152,7 @@ simulate_fr <- function(
     lambda_mat <- matrix(rep(lambda_vec, horizon), nrow = n_sim, ncol = horizon)
   }
 
+  # Draw θ: Proportion of children/adults
   if (resample_theta) {
     theta_mat <- matrix(
       stats::rbeta(n_sim * horizon, shape1 = bfit$alpha, shape2 = bfit$beta),
@@ -164,13 +167,16 @@ simulate_fr <- function(
   # Adjust expected counts by scenario multipliers
   lambda_mat <- sweep(lambda_mat, 2, rate_adjust, `*`)
 
-  # Simulate grants then children
+  # Simulate all visa grants then adults/children
   grants_mat <- matrix(0L, n_sim, horizon)
-  children_mat <- matrix(0L, n_sim, horizon)
+  subset_mat <- matrix(0L, n_sim, horizon)
   for (t in seq_len(horizon)) {
+    # All visas
     grants_mat[, t] <- stats::rpois(n_sim, lambda = lambda_mat[, t])
+    
+    # Adults/children as a subset of all grants
     theta_t <- pmin(pmax(theta_mat[, t], 1e-9), 1 - 1e-9) # guardrails
-    children_mat[, t] <- stats::rbinom(
+    subset_mat[, t] <- stats::rbinom(
       n_sim,
       size = grants_mat[, t],
       prob = theta_t
@@ -187,7 +193,7 @@ simulate_fr <- function(
     )
   }
   period_stats <- purrr::map_dfr(seq_len(horizon), function(t) {
-    ct <- children_mat[, t]
+    ct <- subset_mat[, t]
     gt <- grants_mat[, t]
     tibble::tibble(
       period = t,
@@ -195,17 +201,18 @@ simulate_fr <- function(
       grants_median = stats::median(gt),
       grants_q05 = qfun(gt)[1],
       grants_q95 = qfun(gt)[5],
-      children_mean = mean(ct),
-      children_median = stats::median(ct),
-      children_q05 = qfun(ct)[1],
-      children_q25 = qfun(ct)[2],
-      children_q50 = qfun(ct)[3],
-      children_q75 = qfun(ct)[4],
-      children_q95 = qfun(ct)[5]
-    )
+      subset_mean = mean(ct),
+      subset_median = stats::median(ct),
+      subset_q05 = qfun(ct)[1],
+      subset_q25 = qfun(ct)[2],
+      subset_q50 = qfun(ct)[3],
+      subset_q75 = qfun(ct)[4],
+      subset_q95 = qfun(ct)[5]
+    ) |> 
+      dplyr::rename_with(~ gsub("subset", subset_name, .x), starts_with("subset_"))
   })
 
-  total_children <- rowSums(children_mat)
+  total_subset <- rowSums(subset_mat)
   total_grants <- rowSums(grants_mat)
   total_summary <- tibble::tibble(
     horizon = horizon,
@@ -213,20 +220,21 @@ simulate_fr <- function(
     grants_median = stats::median(total_grants),
     grants_q05 = qfun(total_grants)[1],
     grants_q95 = qfun(total_grants)[5],
-    children_mean = mean(total_children),
-    children_median = stats::median(total_children),
-    children_q05 = qfun(total_children)[1],
-    children_q25 = qfun(total_children)[2],
-    children_q50 = qfun(total_children)[3],
-    children_q75 = qfun(total_children)[4],
-    children_q95 = qfun(total_children)[5]
-  )
+    subset_mean = mean(total_subset),
+    subset_median = stats::median(total_subset),
+    subset_q05 = qfun(total_subset)[1],
+    subset_q25 = qfun(total_subset)[2],
+    subset_q50 = qfun(total_subset)[3],
+    subset_q75 = qfun(total_subset)[4],
+    subset_q95 = qfun(total_subset)[5]
+  ) |> 
+    dplyr::rename_with(~ gsub("subset", subset_name, .x), starts_with("subset_"))
 
   list(
     draws = list(
-      children = children_mat,
       grants = grants_mat,
-      p_child = theta_mat,
+      subset = subset_mat,
+      theta = theta_mat,
       lambda = lambda_mat
     ),
     priors = list(gamma = gfit, beta = bfit),
@@ -345,6 +353,7 @@ hist(
 
 # Forecast next 3 periods (i.e. to 2023-06-30)
 sim <- simulate_fr(
+  subset_name = "children",
   counts_hist = fr_summary$visas_granted,
   props_hist = fr_adults_kids[fr_adults_kids$age_group == "Child", ]$prop,
   totals_hist = fr_summary$visas_granted,
@@ -464,6 +473,7 @@ hist(
 
 # Forecast next 3 periods (i.e. to the end of March 2026)
 sim_adults <- simulate_fr(
+  subset_name = "adults",
   counts_hist = fr_summary$visas_granted,
   props_hist = fr_adults_kids[fr_adults_kids$age_group == "Adult", ]$prop,
   totals_hist = fr_summary$visas_granted,
