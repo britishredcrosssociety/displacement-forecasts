@@ -304,6 +304,16 @@ fr_adults_kids_all <- fr |>
   mutate(prop = visas_granted / sum(visas_granted)) |>
   ungroup()
 
+# Date from which Family Reunion visa grants became high each quarter
+from_date <- as.Date("2024-06-30")
+
+fr_summary <- fr_summary_all |>
+  filter(date >= from_date)
+
+# What proportion of FR visas are adults vs children?
+fr_adults_kids <- fr_adults_kids_all |>
+  filter(date >= from_date)
+
 # ---- Test model against historical data ----
 # Look for when the step change in visa grants began
 fr_summary_all |>
@@ -389,16 +399,6 @@ test_accuracy |>
 # Two of the three periods fall within 95% prediction intervals
 # The first period (2022-12-31) is slightly out: actual number of visas granted
 # to children is 37 visas lower than the bottom of our predicted range.
-
-# Date from which Family Reunion visa grants became high each quarter
-from_date <- as.Date("2024-06-30")
-
-fr_summary <- fr_summary_all |>
-  filter(date >= from_date)
-
-# What proportion of FR visas are adults vs children?
-fr_adults_kids <- fr_adults_kids_all |>
-  filter(date >= from_date)
 
 # ---- Forecast children granted FR visas ----
 # Fit priors from history
