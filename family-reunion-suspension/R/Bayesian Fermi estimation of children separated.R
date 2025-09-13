@@ -440,6 +440,11 @@ sim <- simulate_fr(
   seed = 2025
 )
 
+# Density plot of number of children granted visas in a quarter
+rethinking::dens(sim$draws$subset)
+rethinking::PI(sim$draws$subset, prob = 0.95)
+rethinking::HPDI(sim$draws$subset, prob = 0.95)  # highest density percentile interval
+
 # Per-period forecast summary for children
 sim$summary |>
   select(period, starts_with("children_")) |>
