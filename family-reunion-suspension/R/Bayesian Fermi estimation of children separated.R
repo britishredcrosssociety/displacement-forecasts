@@ -179,7 +179,7 @@ simulate_fr <- function(
   for (t in seq_len(horizon)) {
     # All visas
     grants_mat[, t] <- stats::rpois(n_sim, lambda = lambda_mat[, t])
-    
+
     # Adults/children as a subset of all grants
     theta_t <- pmin(pmax(theta_mat[, t], 1e-9), 1 - 1e-9) # guardrails
     subset_mat[, t] <- stats::rbinom(
@@ -214,8 +214,11 @@ simulate_fr <- function(
       subset_q50 = qfun(ct)[3],
       subset_q75 = qfun(ct)[4],
       subset_q95 = qfun(ct)[5]
-    ) |> 
-      dplyr::rename_with(~ gsub("subset", subset_name, .x), starts_with("subset_"))
+    ) |>
+      dplyr::rename_with(
+        ~ gsub("subset", subset_name, .x),
+        starts_with("subset_")
+      )
   })
 
   total_subset <- rowSums(subset_mat)
@@ -233,8 +236,11 @@ simulate_fr <- function(
     subset_q50 = qfun(total_subset)[3],
     subset_q75 = qfun(total_subset)[4],
     subset_q95 = qfun(total_subset)[5]
-  ) |> 
-    dplyr::rename_with(~ gsub("subset", subset_name, .x), starts_with("subset_"))
+  ) |>
+    dplyr::rename_with(
+      ~ gsub("subset", subset_name, .x),
+      starts_with("subset_")
+    )
 
   list(
     draws = list(
@@ -332,27 +338,27 @@ fr_summary_all |>
 to_date <- as.Date("2022-09-30")
 
 # Fetch data only up to when the step change in grants began, minus three quarters
-fr_summary <- fr |>
+fr_summary_testing <- fr |>
   filter(date <= to_date) |>
   group_by(date) |>
   summarise(visas_granted = sum(visas_granted)) |>
   ungroup()
 
-fr_adults_kids <- fr_adults_kids_all |>
+fr_adults_kids_testing <- fr_adults_kids_all |>
   filter(date <= to_date)
 
 # Fit priors from history
-gamma_prior <- fit_gamma_from_counts(fr_summary$visas_granted)
+gamma_prior <- fit_gamma_from_counts(fr_summary_testing$visas_granted)
 beta_prior <- fit_beta_from_props(
-  fr_adults_kids[fr_adults_kids$age_group == "Child", ]$prop,
-  totals = fr_summary$visas_granted
+  fr_adults_kids_testing[fr_adults_kids_testing$age_group == "Child", ]$prop,
+  totals = fr_summary_testing$visas_granted
 ) # uses reconstructed successes/failures
 
 # Visualize priors
 p_grants <- stats::rgamma(1000, shape = gamma_prior$a, rate = gamma_prior$b)
 hist(p_grants)
 # Overlay actual data onto histogram
-hist(fr_summary$visas_granted, add = TRUE, col = rgb(1, 0, 0, 0.5))
+hist(fr_summary_testing$visas_granted, add = TRUE, col = rgb(1, 0, 0, 0.5))
 
 p_children <- stats::rbeta(
   1000,
@@ -362,7 +368,7 @@ p_children <- stats::rbeta(
 hist(p_children)
 # Overlay actual data onto histogram
 hist(
-  fr_adults_kids[fr_adults_kids$age_group == "Child", ]$prop,
+  fr_adults_kids_testing[fr_adults_kids_testing$age_group == "Child", ]$prop,
   add = TRUE,
   col = rgb(1, 0, 0, 0.5)
 )
@@ -370,14 +376,16 @@ hist(
 # Forecast next 3 periods (i.e. to 2023-06-30)
 sim <- simulate_fr(
   subset_name = "children",
-  counts_hist = fr_summary$visas_granted,
-  props_hist = fr_adults_kids[fr_adults_kids$age_group == "Child", ]$prop,
-  totals_hist = fr_summary$visas_granted,
+  counts_hist = fr_summary_testing$visas_granted,
+  props_hist = fr_adults_kids_testing[
+    fr_adults_kids_testing$age_group == "Child",
+  ]$prop,
+  totals_hist = fr_summary_testing$visas_granted,
   horizon = 3,
   n_sim = 10000,
   resample_lambda = TRUE, # allow process variability period-to-period
   resample_theta = TRUE, # allow composition to drift
-  rate_adjust = c(1.00, 1.02, 1.02), # optional trend/scenario (e.g., +2% per period)
+  rate_adjust = c(1.00, 1.02, 1.04), # optional trend/scenario (e.g., +2% per period)
   seed = 2025
 )
 
@@ -450,21 +458,21 @@ sim <- simulate_fr(
 draws_children <- sim$draws$subset
 
 # Density plot of number of children granted visas in each quarter
-rethinking::dens(draws_children[,1])
-rethinking::dens(draws_children[,2], add = TRUE, col = "blue")
-rethinking::dens(draws_children[,3], add = TRUE, col = "red")
+rethinking::dens(draws_children[, 1])
+rethinking::dens(draws_children[, 2], add = TRUE, col = "blue")
+rethinking::dens(draws_children[, 3], add = TRUE, col = "red")
 
-rethinking::dens(draws_children[,1], show.HPDI = 0.95)
+rethinking::dens(draws_children[, 1], show.HPDI = 0.95)
 
-rethinking::PI(draws_children[,1], prob = 0.95)
-rethinking::HPDI(draws_children[,1], prob = 0.95)  # highest density percentile interval
+rethinking::PI(draws_children[, 1], prob = 0.95)
+rethinking::HPDI(draws_children[, 1], prob = 0.95) # highest density percentile interval
 
 # Use coda for HDPI
 # draws_mcmc <- coda::as.mcmc(draws_children[,1])
 # coda::HPDinterval(draws_mcmc, prob = 0.95)
 
 # Total number of children granted visas over the 3 quarters
-draws_children[,1] <- draws_children[,1] / 3  # only want September for first quarter
+draws_children[, 1] <- draws_children[, 1] / 3 # only want September for first quarter
 draws_children_total <- rowSums(draws_children)
 
 rethinking::PI(draws_children_total, prob = 0.95)
@@ -511,9 +519,19 @@ sim_adults <- simulate_fr(
   n_sim = 10000,
   resample_lambda = TRUE, # allow process variability period-to-period
   resample_theta = TRUE, # allow composition to drift
-  rate_adjust = c(1.00, 1.02, 1.02), # optional trend/scenario (e.g., +2% per period)
+  rate_adjust = c(1.00, 1.02, 1.04), # optional trend/scenario (e.g., +2% per period)
   seed = 2025
 )
+
+# Explore and summarise draws from the posterior distribution
+draws_adults <- sim_adults$draws$subset
+
+# Total number of adults granted visas over the 3 quarters
+draws_adults[, 1] <- draws_adults[, 1] / 3 # only want September for first quarter
+draws_adults_total <- rowSums(draws_adults)
+
+rethinking::PI(draws_adults_total, prob = 0.95)
+rethinking::HPDI(draws_adults_total, prob = 0.95)
 
 # Per-period forecast summary
 sim_adults$summary |>
@@ -527,6 +545,17 @@ sim_adults$summary |>
   # Totals
   summarise(across(-period, sum))
 
+# ---- Total numbers of people ----
+# Explore and summarise draws from the posterior distribution
+draws_everyone <- sim_adults$draws$grants
+
+# Total number of visas granted over the 3 quarters
+draws_everyone[, 1] <- draws_everyone[, 1] / 3 # only want September for first quarter
+draws_everyone_total <- rowSums(draws_everyone)
+
+rethinking::PI(draws_everyone_total, prob = 0.95)
+rethinking::HPDI(draws_everyone_total, prob = 0.95)
+
 # ---- Forecast unaccompanied children ----
 # For proportions of FR visas for unaccompanied children, we only have data
 # from British Red Cross's Family Reunion Travel Assistance (FRTA) service.
@@ -536,10 +565,10 @@ sim_adults$summary |>
 # unaccompanied children among the wider group of visa-holders.
 unaccompanied_props <- c(0.158, .113, .164)
 
-fr_summary_annual <- fr |> 
-  group_by(year = year(date)) |> 
-  summarise(visas_granted = sum(visas_granted)) |> 
-  filter(year%in% 2023:2025)
+fr_summary_annual <- fr |>
+  group_by(year = year(date)) |>
+  summarise(visas_granted = sum(visas_granted)) |>
+  filter(year %in% 2023:2025)
 
 # Forecast next 3 periods (i.e. to the end of March 2026)
 sim_unaccompanied <- simulate_fr(
@@ -555,6 +584,16 @@ sim_unaccompanied <- simulate_fr(
   seed = 2025
 )
 
+# Explore and summarise draws from the posterior distribution
+draws_unaccompanied <- sim_unaccompanied$draws$subset
+
+# Total number of visas granted over the 3 quarters
+draws_unaccompanied[, 1] <- draws_unaccompanied[, 1] / 3 # only want September for first quarter
+draws_unaccompanied_total <- rowSums(draws_unaccompanied)
+
+rethinking::PI(draws_unaccompanied_total, prob = 0.95)
+rethinking::HPDI(draws_unaccompanied_total, prob = 0.95)
+
 # Per-period forecast summary
 sim_unaccompanied$summary |>
   # For the first quarter, we only want September (the final month) so
@@ -563,6 +602,6 @@ sim_unaccompanied$summary |>
     starts_with("unaccompanied_children_"),
     ~ if_else(period == 1, .x / 3, .x)
   )) |>
-  
+
   # Totals
   summarise(across(starts_with("unaccompanied_children_"), sum))
