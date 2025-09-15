@@ -1,6 +1,12 @@
 library(tidyverse)
 library(asylum)
 
+# Install the 'slim' version of the {rethinking} package, which doesn't require
+# C++ toolchain or Stan installation.
+# install.packages(c("coda","mvtnorm","devtools","loo","dagitty"))
+# devtools::install_github("rmcelreath/rethinking@slim")
+library(rethinking)
+
 #' Empirical-Bayes Gamma prior from historical counts
 #'
 #' We assume a Poisson–Gamma mixture across periods:
@@ -436,14 +442,33 @@ sim <- simulate_fr(
   n_sim = 10000,
   resample_lambda = TRUE, # allow process variability period-to-period
   resample_theta = TRUE, # allow composition to drift
-  rate_adjust = c(1.00, 1.02, 1.02), # optional trend/scenario (e.g., +2% per period)
+  rate_adjust = c(1.00, 1.02, 1.04), # optional trend/scenario (e.g., +2% per period)
   seed = 2025
 )
 
-# Density plot of number of children granted visas in a quarter
-rethinking::dens(sim$draws$subset)
-rethinking::PI(sim$draws$subset, prob = 0.95)
-rethinking::HPDI(sim$draws$subset, prob = 0.95)  # highest density percentile interval
+# Explore and summarise draws from the posterior distribution
+draws_children <- sim$draws$subset
+
+# Density plot of number of children granted visas in each quarter
+rethinking::dens(draws_children[,1])
+rethinking::dens(draws_children[,2], add = TRUE, col = "blue")
+rethinking::dens(draws_children[,3], add = TRUE, col = "red")
+
+rethinking::dens(draws_children[,1], show.HPDI = 0.95)
+
+rethinking::PI(draws_children[,1], prob = 0.95)
+rethinking::HPDI(draws_children[,1], prob = 0.95)  # highest density percentile interval
+
+# Use coda for HDPI
+# draws_mcmc <- coda::as.mcmc(draws_children[,1])
+# coda::HPDinterval(draws_mcmc, prob = 0.95)
+
+# Total number of children granted visas over the 3 quarters
+draws_children[,1] <- draws_children[,1] / 3  # only want September for first quarter
+draws_children_total <- rowSums(draws_children)
+
+rethinking::PI(draws_children_total, prob = 0.95)
+rethinking::HPDI(draws_children_total, prob = 0.95)
 
 # Per-period forecast summary for children
 sim$summary |>
