@@ -48,3 +48,23 @@ fr_summary_all |>
   scale_y_continuous(labels = scales::percent)
 
 ggplotly()
+
+# How correlated are visas for adults and children?
+fr_adults_kids_all <- fr |>
+  mutate(age_group = if_else(age == "Under 18", "Child", "Adult")) |>
+  group_by(date, age_group) |>
+  summarise(visas_granted = sum(visas_granted)) |>
+  ungroup() |>
+  group_by(date) |>
+  mutate(prop = visas_granted / sum(visas_granted)) |>
+  ungroup()
+
+fr_adults_kids_all |>
+  ggplot(aes(
+    x = date,
+    y = visas_granted,
+    colour = age_group,
+    group = age_group
+  )) +
+  geom_line() +
+  theme_minimal()
